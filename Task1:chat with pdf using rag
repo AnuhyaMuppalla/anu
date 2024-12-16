@@ -1,0 +1,53 @@
+import fitz  # PyMuPDF
+
+def extract_text_from_pdf(pdf_path):
+    text_data = {}
+    with fitz.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf):
+            text_data[page_num] = page.get_text()
+    return text_data
+from nltk.tokenize import sent_tokenize
+
+def chunk_text(text, chunk_size=300):
+    sentences = sent_tokenize(text)
+    chunks, current_chunk = [], []
+    current_size = 0
+    for sentence in sentences:
+        current_chunk.append(sentence)
+        current_size += len(sentence.split())
+        if current_size >= chunk_size:
+            chunks.append(" ".join(current_chunk))
+            current_chunk, current_size = [], 0
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+    return chunks
+from sentence_transformers import SentenceTransformer
+
+def generate_embeddings(chunks):
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    embeddings = model.encode(chunks)
+    return embeddings
+import pinecone
+
+pinecone.init(api_key="your_api_key", environment="your_environment")
+index = pinecone.Index("rag_pipeline")
+
+def store_embeddings(chunks, embeddings):
+    for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        index.upsert([(f"doc_{i}", embedding, {"text": chunk})])
+def query_vector(query, embedding_model):
+    return embedding_model.encode([query])[0]
+
+def retrieve_similar_chunks(query, index, top_k=5):
+    query_embedding = query_vector(query, SentenceTransformer('all-MiniLM-L6-v2'))
+    results = index.query(query_embedding, top_k=top_k, include_metadata=True)
+    return [res['metadata']['text'] for res in results['matches']]
+from openai import ChatCompletion
+
+def generate_response(query, context_chunks):
+    prompt = f"Answer the following query using the context provided:\n\nQuery: {query}\n\nContext: {' '.join(context_chunks)}"
+    response = ChatCompletion.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": prompt}]
+    )
+    return response["choices"][0]["message"]["content"]
