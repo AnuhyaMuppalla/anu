@@ -1,0 +1,61 @@
+import scrapy
+from sentence_transformers import SentenceTransformer
+import faiss
+
+# Load the model
+model_name = "sentence-transformers/all-MiniLM-L6-v2"
+model = SentenceTransformer(model_name)
+
+class WebsiteSpider(scrapy.Spider):
+    name = 'website_spider'
+    allowed_domains = ['uchicago.edu', 'washington.edu', 'stanford.edu', 'und.edu']
+    start_urls = ['https://www.uchicago.edu/', 'https://www.washington.edu/', 'https://www.stanford.edu/', 'https://und.edu/']
+
+    def parse(self, response):
+        # Extract text from the response
+        text = response.css('p::text').extract()
+        text = ' '.join(text)
+
+        # Chunk the text
+        chunk_size = 512
+        chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+
+        # Create embeddings for the chunks
+        embeddings = model.encode(chunks)
+
+        # Yield the chunks and embeddings
+        for chunk, embedding in zip(chunks, embeddings):
+            yield {
+                'chunk': chunk,
+                'embedding': embedding
+            }
+
+# Create a FAISS index
+def create_faiss_index(embeddings):
+    d = embeddings.shape[1]  # Dimensionality
+    index = faiss.IndexFlatL2(d)  # Build the index
+    index.add(embeddings)  # Add vectors to the index
+    return index
+
+# Query the index
+def query_index(index, query_text):
+    query_embedding = model.encode([query_text])
+    distances, indices = index.search(query_embedding, k=5)  # Find top 5 similar chunks
+    return indices[0]
+
+# Retrieve and process the relevant chunks
+def retrieve_and_process(indices, chunks):
+    relevant_chunks = [chunks[i] for i in indices]
+    # ... (process the chunks further, e.g., feed to LLM)
+    return processed_chunks
+
+# Example usage
+process = CrawlerProcess({
+    'USER_AGENT': 'My User Agent'
+})
+
+process.crawl(WebsiteSpider)
+process.start()
+
+# Once the spider finishes, you'll have a list of chunks and their embeddings.
+# Create the FAISS index and query it as shown above.
